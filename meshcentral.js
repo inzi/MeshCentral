@@ -3476,9 +3476,14 @@ function CreateMeshCentralServer(config, args) {
                     if (obj.config.settings && obj.config.settings.ExternalSignJob) {
                         signingArguments.externalSignJob = obj.config.settings.ExternalSignJob;
                     }
-
-                    // Sign the agent
-                    originalAgent.sign(agentSignCertInfo, signingArguments, xagentSignedFunc);
+                    if (resChanges == false) {
+                        // Sign the agent the simple way, without changing any resources.
+                        originalAgent.sign(agentSignCertInfo, signingArguments, xagentSignedFunc);
+                    } else {
+                        // Change the agent resources and sign the agent, this is a much more involved process.
+                        // NOTE: This is experimental and could corupt the agent.
+                        originalAgent.writeExecutable(signingArguments, agentSignCertInfo, xagentSignedFunc);
+                    }
                 } else {
                     // Signed agent is already ok, use it.
                     originalAgent.close();
@@ -3842,7 +3847,7 @@ function CreateMeshCentralServer(config, args) {
             }
             obj.debug('cookie', 'Decoded AESGCM cookie: ' + JSON.stringify(o));
             return o;
-        } catch (ex) { obj.debug('cookie', 'ERR: Bad AESGCM cookie due to exception: ' + ex); return -1; }
+        } catch (ex) { obj.debug('cookie', 'ERR: Bad AESSHA / AESGCM cookie due to exception: ' + ex); return -1; }
     };
 
     // Decode a cookie back into an object using a key using AES256 / HMAC-SHA384. Return null if it's not a valid cookie. (key must be 80 bytes or more)
@@ -3871,7 +3876,7 @@ function CreateMeshCentralServer(config, args) {
             }
             obj.debug('cookie', 'Decoded AESSHA cookie: ' + JSON.stringify(o));
             return o;
-        } catch (ex) { obj.debug('cookie', 'ERR: Bad AESGCM cookie due to exception: ' + ex); return null; }
+        } catch (ex) { obj.debug('cookie', 'ERR: Bad AESSHA cookie due to exception: ' + ex); return null; }
     };
 
     // Debug
