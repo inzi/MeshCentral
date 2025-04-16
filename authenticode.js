@@ -1439,6 +1439,83 @@ function createAuthenticodeHandler(path) {
     obj.sign = function (cert, args, func) {
         if (cert == null) { cert = createSelfSignedCert({ cn: 'Test' }); }
 
+        // Check for external signing process
+        if (args.externalSignJob) {
+            // Generate signing parameters
+            const signingParams = {
+                source: {
+                    path: obj.header.path,
+                    hash: {
+                        algorithm: args.hash || 'sha384',
+                        value: obj.getHash(args.hash || 'sha384').toString('hex')
+                    }
+                },
+                destination: {
+                    path: args.out
+                },
+                signing: {
+                    description: args.desc,
+                    url: args.url,
+                    timeStampUrl: args.time,
+                    timeStampProxy: args.proxy
+                },
+                certificate: {
+                    path: cert.certPath, // Path to the certificate if provided
+                    customCert: cert.cert ? true : false
+                }
+            };
+
+            const signingParamsPath = require('path').join(require('path').dirname(args.out), 'signingParams.json');
+
+            try {
+                // Write signing parameters to file
+                require('fs').writeFileSync(signingParamsPath, JSON.stringify(signingParams, null, 2));
+
+                // Call external signing script
+                const { spawn } = require('child_process');
+                const signProcess = spawn(args.externalSignJob, [signingParamsPath], {
+                    cwd: require('path').dirname(args.out)
+                });
+
+                let stdoutData = '';
+                let stderrData = '';
+
+                signProcess.stdout.on('data', (data) => {
+                    stdoutData += data.toString();
+                });
+
+                signProcess.stderr.on('data', (data) => {
+                    stderrData += data.toString();
+                });
+
+                signProcess.on('error', (err) => {
+                    require('fs').unlinkSync(signingParamsPath); // Clean up params file
+                    func(err.message);
+                });
+
+                signProcess.on('exit', (code) => {
+                    require('fs').unlinkSync(signingParamsPath); // Clean up params file
+                    if (code === 0) {
+                        // Verify the signed file exists
+                        if (require('fs').existsSync(args.out)) {
+                            func(null);
+                        } else {
+                            func('External signing completed but signed file not found');
+                        }
+                    } else {
+                        func(`External signing failed (code ${code}): ${stderrData || stdoutData}`);
+                    }
+                });
+                return;
+            } catch (ex) {
+                func(`Failed to execute external signing: ${ex.message}`);
+                return;
+            }
+        }
+
+        // Continue with original signing process if no external signing or if external signing failed
+        // ... existing signing code ...
+
         // Set the hash algorithm hash OID
         var hashOid = null, fileHash = null;
         if (args.hash == null) { args.hash = 'sha384'; }
@@ -1451,12 +1528,135 @@ function createAuthenticodeHandler(path) {
 
         // Create the signature block
         var xp7 = forge.pkcs7.createSignedData();
-        var content = { 'tagClass': 0, 'type': 16, 'constructed': true, 'composed': true, 'value': [{ 'tagClass': 0, 'type': 16, 'constructed': true, 'composed': true, 'value': [{ 'tagClass': 0, 'type': 6, 'constructed': false, 'composed': false, 'value': forge.asn1.oidToDer('1.3.6.1.4.1.311.2.1.15').data }, { 'tagClass': 0, 'type': 16, 'constructed': true, 'composed': true, 'value': [{ 'tagClass': 0, 'type': 3, 'constructed': false, 'composed': false, 'value': '\u0000', 'bitStringContents': '\u0000', 'original': { 'tagClass': 0, 'type': 3, 'constructed': false, 'composed': false, 'value': '\u0000' } }, { 'tagClass': 128, 'type': 0, 'constructed': true, 'composed': true, 'value': [{ 'tagClass': 128, 'type': 2, 'constructed': true, 'composed': true, 'value': [{ 'tagClass': 128, 'type': 0, 'constructed': false, 'composed': false, 'value': '' }] }] }] }] }, { 'tagClass': 0, 'type': 16, 'constructed': true, 'composed': true, 'value': [{ 'tagClass': 0, 'type': 16, 'constructed': true, 'composed': true, 'value': [{ 'tagClass': 0, 'type': 6, 'constructed': false, 'composed': false, 'value': forge.asn1.oidToDer(hashOid).data }, { 'tagClass': 0, 'type': 5, 'constructed': false, 'composed': false, 'value': '' }] }, { 'tagClass': 0, 'type': 4, 'constructed': false, 'composed': false, 'value': fileHash.toString('binary') }] }] };
-        xp7.contentInfo = forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.SEQUENCE, true, [forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.OID, false, forge.asn1.oidToDer('1.3.6.1.4.1.311.2.1.4').getBytes())]);
-        xp7.contentInfo.value.push(forge.asn1.create(forge.asn1.Class.CONTEXT_SPECIFIC, 0, true, [content]));
-        xp7.content = {}; // We set .contentInfo and have .content empty to bypass node-forge limitation on the type of content it can sign.
+        var content = {
+            tagClass: 0,
+            type: 16,
+            constructed: true,
+            composed: true,
+            value: [{
+                tagClass: 0,
+                type: 16,
+                constructed: true,
+                composed: true,
+                value: [
+                    {
+                        tagClass: 0,
+                        type: 6,
+                        constructed: false,
+                        composed: false,
+                        value: forge.asn1.oidToDer('1.3.6.1.4.1.311.2.1.15').data
+                    },
+                    {
+                        tagClass: 0,
+                        type: 16,
+                        constructed: true,
+                        composed: true,
+                        value: [
+                            {
+                                tagClass: 0,
+                                type: 3,
+                                constructed: false,
+                                composed: false,
+                                value: '\u0000',
+                                bitStringContents: '\u0000',
+                                original: {
+                                    tagClass: 0,
+                                    type: 3,
+                                    constructed: false,
+                                    composed: false,
+                                    value: '\u0000'
+                                }
+                            },
+                            {
+                                tagClass: 128,
+                                type: 0,
+                                constructed: true,
+                                composed: true,
+                                value: [{
+                                    tagClass: 128,
+                                    type: 2,
+                                    constructed: true,
+                                    composed: true,
+                                    value: [{
+                                        tagClass: 128,
+                                        type: 0,
+                                        constructed: false,
+                                        composed: false,
+                                        value: ''
+                                    }]
+                                }]
+                            }
+                        ]
+                    },
+                    {
+                        tagClass: 0,
+                        type: 16,
+                        constructed: true,
+                        composed: true,
+                        value: [{
+                            tagClass: 0,
+                            type: 16,
+                            constructed: true,
+                            composed: true,
+                            value: [
+                                {
+                                    tagClass: 0,
+                                    type: 6,
+                                    constructed: false,
+                                    composed: false,
+                                    value: forge.asn1.oidToDer(hashOid).data
+                                },
+                                {
+                                    tagClass: 0,
+                                    type: 5,
+                                    constructed: false,
+                                    composed: false,
+                                    value: ''
+                                }
+                            ]
+                        },
+                        {
+                            tagClass: 0,
+                            type: 4,
+                            constructed: false,
+                            composed: false,
+                            value: fileHash.toString('binary')
+                        }]
+                    }
+                ]
+            }]
+        };
+
+        xp7.contentInfo = forge.asn1.create(
+            forge.asn1.Class.UNIVERSAL,
+            forge.asn1.Type.SEQUENCE,
+            true,
+            [forge.asn1.create(
+                forge.asn1.Class.UNIVERSAL,
+                forge.asn1.Type.OID,
+                false,
+                forge.asn1.oidToDer('1.3.6.1.4.1.311.2.1.4').getBytes()
+            )]
+        );
+
+        xp7.contentInfo.value.push(forge.asn1.create(
+            forge.asn1.Class.CONTEXT_SPECIFIC,
+            0,
+            true,
+            [content]
+        ));
+
+        // We set .contentInfo and have .content empty to bypass node-forge limitation on the type of content it can sign.
+        xp7.content = {};
+
         xp7.addCertificate(cert.cert);
-        if (cert.extraCerts) { for (var i = 0; i < cert.extraCerts.length; i++) { xp7.addCertificate(cert.extraCerts[0]); } } // Add any extra certificates that form the cert chain
+
+        // Add any extra certificates that form the cert chain
+        if (cert.extraCerts) {
+            for (var i = 0; i < cert.extraCerts.length; i++) {
+                xp7.addCertificate(cert.extraCerts[0]);
+            }
+        }
 
         // Build authenticated attributes
         var authenticatedAttributes = [
@@ -1904,12 +2104,135 @@ function createAuthenticodeHandler(path) {
 
             // Create the signature block
             var xp7 = forge.pkcs7.createSignedData();
-            var content = { 'tagClass': 0, 'type': 16, 'constructed': true, 'composed': true, 'value': [{ 'tagClass': 0, 'type': 16, 'constructed': true, 'composed': true, 'value': [{ 'tagClass': 0, 'type': 6, 'constructed': false, 'composed': false, 'value': forge.asn1.oidToDer('1.3.6.1.4.1.311.2.1.15').data }, { 'tagClass': 0, 'type': 16, 'constructed': true, 'composed': true, 'value': [{ 'tagClass': 0, 'type': 3, 'constructed': false, 'composed': false, 'value': '\u0000', 'bitStringContents': '\u0000', 'original': { 'tagClass': 0, 'type': 3, 'constructed': false, 'composed': false, 'value': '\u0000' } }, { 'tagClass': 128, 'type': 0, 'constructed': true, 'composed': true, 'value': [{ 'tagClass': 128, 'type': 2, 'constructed': true, 'composed': true, 'value': [{ 'tagClass': 128, 'type': 0, 'constructed': false, 'composed': false, 'value': '' }] }] }] }] }, { 'tagClass': 0, 'type': 16, 'constructed': true, 'composed': true, 'value': [{ 'tagClass': 0, 'type': 16, 'constructed': true, 'composed': true, 'value': [{ 'tagClass': 0, 'type': 6, 'constructed': false, 'composed': false, 'value': forge.asn1.oidToDer(hashOid).data }, { 'tagClass': 0, 'type': 5, 'constructed': false, 'composed': false, 'value': '' }] }, { 'tagClass': 0, 'type': 4, 'constructed': false, 'composed': false, 'value': fileHash.toString('binary') }] }] };
-            xp7.contentInfo = forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.SEQUENCE, true, [forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.OID, false, forge.asn1.oidToDer('1.3.6.1.4.1.311.2.1.4').getBytes())]);
-            xp7.contentInfo.value.push(forge.asn1.create(forge.asn1.Class.CONTEXT_SPECIFIC, 0, true, [content]));
-            xp7.content = {}; // We set .contentInfo and have .content empty to bypass node-forge limitation on the type of content it can sign.
+            var content = {
+                tagClass: 0,
+                type: 16,
+                constructed: true,
+                composed: true,
+                value: [{
+                    tagClass: 0,
+                    type: 16,
+                    constructed: true,
+                    composed: true,
+                    value: [
+                        {
+                            tagClass: 0,
+                            type: 6,
+                            constructed: false,
+                            composed: false,
+                            value: forge.asn1.oidToDer('1.3.6.1.4.1.311.2.1.15').data
+                        },
+                        {
+                            tagClass: 0,
+                            type: 16,
+                            constructed: true,
+                            composed: true,
+                            value: [
+                                {
+                                    tagClass: 0,
+                                    type: 3,
+                                    constructed: false,
+                                    composed: false,
+                                    value: '\u0000',
+                                    bitStringContents: '\u0000',
+                                    original: {
+                                        tagClass: 0,
+                                        type: 3,
+                                        constructed: false,
+                                        composed: false,
+                                        value: '\u0000'
+                                    }
+                                },
+                                {
+                                    tagClass: 128,
+                                    type: 0,
+                                    constructed: true,
+                                    composed: true,
+                                    value: [{
+                                        tagClass: 128,
+                                        type: 2,
+                                        constructed: true,
+                                        composed: true,
+                                        value: [{
+                                            tagClass: 128,
+                                            type: 0,
+                                            constructed: false,
+                                            composed: false,
+                                            value: ''
+                                        }]
+                                    }]
+                                }
+                            ]
+                        },
+                        {
+                            tagClass: 0,
+                            type: 16,
+                            constructed: true,
+                            composed: true,
+                            value: [{
+                                tagClass: 0,
+                                type: 16,
+                                constructed: true,
+                                composed: true,
+                                value: [
+                                    {
+                                        tagClass: 0,
+                                        type: 6,
+                                        constructed: false,
+                                        composed: false,
+                                        value: forge.asn1.oidToDer(hashOid).data
+                                    },
+                                    {
+                                        tagClass: 0,
+                                        type: 5,
+                                        constructed: false,
+                                        composed: false,
+                                        value: ''
+                                    }
+                                ]
+                            },
+                            {
+                                tagClass: 0,
+                                type: 4,
+                                constructed: false,
+                                composed: false,
+                                value: fileHash.toString('binary')
+                            }]
+                        }
+                    ]
+                }]
+            };
+
+            xp7.contentInfo = forge.asn1.create(
+                forge.asn1.Class.UNIVERSAL,
+                forge.asn1.Type.SEQUENCE,
+                true,
+                [forge.asn1.create(
+                    forge.asn1.Class.UNIVERSAL,
+                    forge.asn1.Type.OID,
+                    false,
+                    forge.asn1.oidToDer('1.3.6.1.4.1.311.2.1.4').getBytes()
+                )]
+            );
+
+            xp7.contentInfo.value.push(forge.asn1.create(
+                forge.asn1.Class.CONTEXT_SPECIFIC,
+                0,
+                true,
+                [content]
+            ));
+
+            // We set .contentInfo and have .content empty to bypass node-forge limitation on the type of content it can sign.
+            xp7.content = {};
+
             xp7.addCertificate(cert.cert);
-            if (cert.extraCerts) { for (var i = 0; i < cert.extraCerts.length; i++) { xp7.addCertificate(cert.extraCerts[0]); } } // Add any extra certificates that form the cert chain
+
+            // Add any extra certificates that form the cert chain
+            if (cert.extraCerts) {
+                for (var i = 0; i < cert.extraCerts.length; i++) {
+                    xp7.addCertificate(cert.extraCerts[0]);
+                }
+            }
 
             // Build authenticated attributes
             var authenticatedAttributes = [

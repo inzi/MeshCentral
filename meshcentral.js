@@ -1603,7 +1603,7 @@ function CreateMeshCentralServer(config, args) {
         if (obj.args.ignoreagenthashcheck === true) { addServerWarning("Agent hash checking is being skipped, this is unsafe.", 9); }
         if (obj.args.port == null || typeof obj.args.port != 'number') { obj.args.port = 443; }
         if (obj.args.aliasport != null && (typeof obj.args.aliasport != 'number')) obj.args.aliasport = null;
-        if (obj.args.mpsport == null || typeof obj.args.mpsport != 'number') obj.args.mpsport = 4433;
+        if (obj.args.mpsport == null || typeof obj.args.mpsport != 'number') { obj.args.mpsport = 4433; }
         if (obj.args.mpsaliasport != null && (typeof obj.args.mpsaliasport != 'number')) obj.args.mpsaliasport = null;
         if (obj.args.rediraliasport != null && (typeof obj.args.rediraliasport != 'number')) obj.args.rediraliasport = null;
         if (obj.args.redirport == null) obj.args.redirport = 80;
@@ -3471,14 +3471,14 @@ function CreateMeshCentralServer(config, args) {
 
                     const signingArguments = { out: signeedagentpath, desc: signDesc, url: signUrl, time: timeStampUrl, proxy: timeStampProxy }; // Shallow clone
                     obj.debug('main', "Code signing with arguments: " + JSON.stringify(signingArguments));
-                    if (resChanges == false) {
-                        // Sign the agent the simple way, without changing any resources.
-                        originalAgent.sign(agentSignCertInfo, signingArguments, xagentSignedFunc);
-                    } else {
-                        // Change the agent resources and sign the agent, this is a much more involved process.
-                        // NOTE: This is experimental and could corupt the agent.
-                        originalAgent.writeExecutable(signingArguments, agentSignCertInfo, xagentSignedFunc);
+
+                    // Add external signing support
+                    if (obj.config.settings && obj.config.settings.ExternalSignJob) {
+                        signingArguments.externalSignJob = obj.config.settings.ExternalSignJob;
                     }
+
+                    // Sign the agent
+                    originalAgent.sign(agentSignCertInfo, signingArguments, xagentSignedFunc);
                 } else {
                     // Signed agent is already ok, use it.
                     originalAgent.close();
@@ -3871,7 +3871,7 @@ function CreateMeshCentralServer(config, args) {
             }
             obj.debug('cookie', 'Decoded AESSHA cookie: ' + JSON.stringify(o));
             return o;
-        } catch (ex) { obj.debug('cookie', 'ERR: Bad AESSHA cookie due to exception: ' + ex); return null; }
+        } catch (ex) { obj.debug('cookie', 'ERR: Bad AESGCM cookie due to exception: ' + ex); return null; }
     };
 
     // Debug
@@ -4102,7 +4102,7 @@ function InstallModuleEx(modulenames, args, func) {
     //if ((meshCentralVersion != null) && (args.dev == null)) { names = 'meshcentral@' + getCurrentVersion() + ' ' + names; }
 
     // Get the working directory
-    if ((__dirname.endsWith('/node_modules/meshcentral')) || (__dirname.endsWith('\\node_modules\\meshcentral')) || (__dirname.endsWith('/node_modules/meshcentral/')) || (__dirname.endsWith('\\node_modules\\meshcentral\\'))) { parentpath = require('path').join(__dirname, '../..'); }
+    if ((__dirname.endsWith('/node_modules/meshcentral')) || (__dirname.endsWith('\\node_modules\\meshcentral')) || (__dirname.endsWith('/node_modules/meshcentral/')) || (__dirname.endsWith('\\node_modules\\meshcentral\\'))) { parentpath = require('path').join(__dirname, '..', '..'); }
 
     if (args.debug) { console.log('NPM Command Line: ' + npmpath + ` install --save-exact --no-audit --omit=optional --no-fund ${names}`); }
     // always use --save-exact - https://stackoverflow.com/a/64507176/1210734

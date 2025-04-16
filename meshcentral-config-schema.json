@@ -744,6 +744,10 @@
           "default": null,
           "description": "Trust forwarded headers from these IPs or domains.  Providing the magic string \"CloudFlare\" will cause the server to download the IP address list of trusted CloudFlare proxies directly from CloudFlare on each server start. For example: \"127.0.0.1,proxy.example.com,CloudFlare\"."
         },
+        "externalSignJob": {
+          "type": "string",
+          "description": "Path to an external script or executable to be used for code signing agents. If specified, this will be used instead of the built-in signing with own key process."
+        },        
         "mpsPort": {
           "type": "integer",
           "minimum": 0,

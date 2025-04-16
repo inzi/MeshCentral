@@ -99,3 +99,128 @@ Now that MeshCentral customizes and signs the agent, you can set that value to a
       }
 }
 ```
+
+## External Code Signing
+
+MeshCentral supports delegating the code signing process to an external script or executable through the `ExternalSignJob` configuration option. This allows you to integrate with existing code signing infrastructure or HSM solutions.
+
+### Configuration
+
+Add the `ExternalSignJob` setting to your config.json:
+
+```json
+{
+  "settings": {
+    "ExternalSignJob": "path/to/your/signing/script.js"
+  }
+}
+```
+
+### External Script Interface
+
+When code signing is needed, MeshCentral will:
+
+1. Generate a `signingParams.json` file containing all necessary signing parameters
+2. Execute your script/executable with the path to `signingParams.json` as the first argument
+3. Wait for the signing process to complete
+
+#### Input Parameters
+
+The `signingParams.json` file will contain:
+
+```json
+{
+  "source": {
+    "path": "C:\\path\\to\\original\\agent.exe",
+    "hash": {
+      "algorithm": "sha384",
+      "value": "hash_of_source_file"
+    }
+  },
+  "destination": {
+    "path": "C:\\path\\to\\signed\\agent.exe"
+  },
+  "signing": {
+    "description": "MeshAgent",
+    "url": "https://myserver.com",
+    "timeStampUrl": "http://timestamp.server.com",
+    "timeStampProxy": null,
+    "agentSignLock": true,
+    "serverIdHash": "ABCDEF1234567890"
+  },
+  "domain": {
+    "id": "domain_id",
+    "title": "Domain Title",
+    "agentFileInfo": {
+      "filedescription": "description",
+      "fileversion": "version",
+      // ... other file info properties
+    }
+  },
+  "certificate": {
+    "path": "C:\\path\\to\\agentsigningcert.pem",
+    "customCert": true
+  }
+}
+```
+
+#### Script Responsibilities
+
+Your external signing script/executable must:
+
+1. Read and parse the `signingParams.json` file
+2. Sign the file at `source.path` using your signing infrastructure
+3. Save the signed file to `destination.path`
+4. Apply any specified file information from `domain.agentFileInfo`
+5. Return exit code 0 for success, non-zero for failure
+6. Clean up any temporary files created during signing
+
+#### Error Handling
+
+- Return non-zero exit code if signing fails
+- Error details should be written to stderr
+- Progress/status information can be written to stdout
+- MeshCentral will clean up the `signingParams.json` file
+
+### Example Implementation
+
+Here's a basic example of an external signing script in Node.js:
+
+```javascript
+const fs = require('fs');
+const path = require('path');
+
+async function signFile(paramsPath) {
+  try {
+    // Read signing parameters
+    const params = JSON.parse(fs.readFileSync(paramsPath, 'utf8'));
+    
+    // Implement your signing logic here
+    // Example: Call your HSM or signing service
+    await yourSigningFunction(
+      params.source.path,
+      params.destination.path,
+      params.signing,
+      params.certificate
+    );
+    
+    // Success
+    process.exit(0);
+  } catch (err) {
+    console.error(err);
+    process.exit(1);
+  }
+}
+
+// Get params file path from command line argument
+signFile(process.argv[2]);
+```
+
+### Security Considerations
+
+- Your external signing script should validate all input parameters
+- Implement proper access controls for your signing certificates/keys
+- Consider using environment variables for sensitive configuration
+- Validate file paths to prevent path traversal attacks
+- Clean up any temporary files containing sensitive information
+- Log signing operations for audit purposes
